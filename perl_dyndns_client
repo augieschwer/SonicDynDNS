@@ -1,0 +1,199 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+# A sample test code for https://public-api.sonic.net/dyndns .
+# Augie Schwer <augie@corp.sonic.net>
+
+use LWP::UserAgent;
+use Test::More tests => 6;
+use JSON;
+use Net::Address::IP::Local;
+use HTTP::Request::Common;
+
+my $ua = LWP::UserAgent->new;
+my $address = Net::Address::IP::Local->public;
+
+### FILL IN YOUR INFO. HERE ###
+###############################
+my $username = '';
+my $password = '';
+my $hostname = '';
+###############################
+
+my $userid = '';
+my $apikey = '';
+my $response = '';
+
+# Test /dyndns/ping
+# Expects :  {"message":"PONG","result":200}
+
+$response = $ua->get('https://public-api.sonic.net/dyndns/ping');
+
+if ( $response->is_success )
+{
+	my $result = from_json( $response->decoded_content );
+	is ( $result->{'result'} , '200' , '/dyndns/ping' );
+}
+else
+{
+	die $response->status_line;
+}
+
+# Test /dyndns/ip
+# Expects :  {"ip":"$address"}
+
+$response = $ua->get('https://public-api.sonic.net/dyndns/ip');
+
+if ( $response->is_success )
+{
+	my $result = from_json( $response->decoded_content );
+	is ( $result->{'ip'} , $address , '/dyndns/ip' );
+}
+else
+{
+	die $response->status_line;
+}
+
+# Test /dyndns/api_key -- Request an API key.
+# Expects :  {"userid":"12345","apikey":"4d6fbf2f9ab0fa11697470918d37625851fc0c51"}
+
+subtest '/dyndns/api_key' => sub {
+	# Test 400 status -- no data given.
+	$response = $ua->post('https://public-api.sonic.net/dyndns/api_key',['username'=>'','password'=>'','hostname'=>'']);
+	my $result = from_json( $response->decoded_content );
+	is ( $result->{'result'} , '400' , '/dyndns/api_key -- no data given, JSON result.' );
+	is ( $response->code , '400' , '/dyndns/api_key -- no data given, HTTP reponse.' );
+
+	# Test 401 status -- incorrect password.
+	$response = $ua->post('https://public-api.sonic.net/dyndns/api_key',['username'=>$username,'password'=>'foo','hostname'=>$hostname]);
+	$result = from_json( $response->decoded_content );
+	is ( $result->{'result'} , '401' , '/dyndns/api_key -- incorrect password, JSON result.' );
+	is ( $response->code , '401' , '/dyndns/api_key -- incorrect password, HTTP reponse.' );
+
+	# Test 401 status -- incorrect hostname.
+	$response = $ua->post('https://public-api.sonic.net/dyndns/api_key',['username'=>$username,'password'=>$password,'hostname'=>'example.net']);
+	$result = from_json( $response->decoded_content );
+	is ( $result->{'result'} , '401' , '/dyndns/api_key -- incorrect hostname, JSON result.' );
+	is ( $response->code , '401' , '/dyndns/api_key -- incorrect hostname, HTTP reponse.' );
+
+	# Test 200 status -- OK.
+	$response = $ua->post('https://public-api.sonic.net/dyndns/api_key',['username'=>$username,'password'=>$password,'hostname'=>$hostname]);
+	$result = from_json( $response->decoded_content );
+	is ( $result->{'result'} , '200' , '/dyndns/api_key -- OK status, JSON result.' );
+	is ( $response->code , '200' , '/dyndns/api_key -- OK status, HTTP response.' );
+	$userid = $result->{'userid'};
+	$apikey = $result->{'apikey'};
+
+	# Test 405 status -- API key already exists.
+	$response = $ua->post('https://public-api.sonic.net/dyndns/api_key',['username'=>$username,'password'=>$password,'hostname'=>$hostname]);
+	$result = from_json( $response->decoded_content );
+	is ( $result->{'result'} , '405' , '/dyndns/api_key -- API key already exists, JSON result.' );
+	is ( $response->code , '405' , '/dyndns/api_key -- API key already exists, HTTP response.' );
+};
+
+# Test /dyndns/list_api_key
+# Expects :  {"data":{"example.com":{"key":"4d6fbf2f9ab0fa11697470918d37625851fc0c51"}},"message":"OK","result":"200"}
+
+subtest '/dyndns/list_api_key' => sub {
+	# Test 400 status -- no data given.
+	$response = $ua->post('https://public-api.sonic.net/dyndns/list_api_key',['username'=>'','password'=>'']);
+	my $result = from_json( $response->decoded_content );
+	is ( $result->{'result'} , '400' , '/dyndns/list_api_key -- no data given, JSON result.' );
+	is ( $response->code , '400' , '/dyndns/list_api_key -- no data given, HTTP reponse.' );
+
+	# Test 401 status -- incorrect password.
+	$response = $ua->post('https://public-api.sonic.net/dyndns/list_api_key',['username'=>$username,'password'=>'foo']);
+	$result = from_json( $response->decoded_content );
+	is ( $result->{'result'} , '401' , '/dyndns/list_api_key -- incorrect password, JSON result.' );
+	is ( $response->code , '401' , '/dyndns/list_api_key -- incorrect password, HTTP reponse.' );
+
+	# Test 200 status -- OK.
+	$response = $ua->post('https://public-api.sonic.net/dyndns/list_api_key',['username'=>$username,'password'=>$password]);
+	$result = from_json( $response->decoded_content );
+	is ( $result->{'result'} , '200' , '/dyndns/list_api_key -- OK status, JSON result.' );
+	is ( $response->code , '200' , '/dyndns/list_api_key -- OK status, HTTP response.' );
+};
+
+# Test /dyndns/host
+# Expects :  {"message":"OK","result":200}
+
+subtest '/dyndns/host' => sub {
+	# Test 200 status -- OK.
+	my $request = POST 'https://public-api.sonic.net/dyndns/host',['userid'=>$userid,'apikey'=>$apikey,'hostname'=>"test.$hostname",'value'=>'127.0.0.2','type'=>'A'];
+	$request->method('PUT');
+	$response = $ua->request($request);
+	my $result = from_json( $response->decoded_content );
+	is ( $result->{'result'} , '200' , '/dyndns/host -- OK status, JSON result.' );
+	is ( $response->code , '200' , '/dyndns/host -- OK status, HTTP reponse.' );
+
+	# Test 400 status -- missing data.
+	$request = POST 'https://public-api.sonic.net/dyndns/host',['userid'=>$userid,'apikey'=>$apikey,'hostname'=>"test.$hostname",'value'=>'127.0.0.2','type'=>''];
+	$request->method('PUT');
+	$response = $ua->request($request);
+	$result = from_json( $response->decoded_content );
+	is ( $result->{'result'} , '400' , '/dyndns/host -- missing data, JSON result.' );
+	is ( $response->code , '400' , '/dyndns/host -- missing data, HTTP reponse.' );
+
+	# Test 400 status -- wrong type.
+	$request = POST 'https://public-api.sonic.net/dyndns/host',['userid'=>$userid,'apikey'=>$apikey,'hostname'=>"test.$hostname",'value'=>'127.0.0.2','type'=>'SRV'];
+	$request->method('PUT');
+	$response = $ua->request($request);
+	$result = from_json( $response->decoded_content );
+	is ( $result->{'result'} , '400' , '/dyndns/host -- wrong type, JSON result.' );
+	is ( $response->code , '400' , '/dyndns/host -- wrong type, HTTP reponse.' );
+
+	# Test 404 status -- bad username.
+	$request = POST 'https://public-api.sonic.net/dyndns/host',['userid'=>'foo','apikey'=>$apikey,'hostname'=>"test.$hostname",'value'=>'127.0.0.2','type'=>'A'];
+	$request->method('PUT');
+	$response = $ua->request($request);
+	$result = from_json( $response->decoded_content );
+	is ( $result->{'result'} , '404' , '/dyndns/host -- bad username, JSON result.' );
+	is ( $response->code , '404' , '/dyndns/host -- bad username, HTTP reponse.' );
+
+	# Test 401 status -- bad apikey.
+	$request = POST 'https://public-api.sonic.net/dyndns/host',['userid'=>$userid,'apikey'=>'bar','hostname'=>"test.$hostname",'value'=>'127.0.0.2','type'=>'A'];
+	$request->method('PUT');
+	$response = $ua->request($request);
+	$result = from_json( $response->decoded_content );
+	is ( $result->{'result'} , '401' , '/dyndns/host -- bad apikey, JSON result.' );
+	is ( $response->code , '401' , '/dyndns/host -- bad apikey, HTTP reponse.' );
+
+	# Test 400 status -- bad data; IPv6 address for A record.
+	$request = POST 'https://public-api.sonic.net/dyndns/host',['userid'=>$userid,'apikey'=>$apikey,'hostname'=>"test.$hostname",'value'=>'fe80::212:3fff:fea5:b831','type'=>'A'];
+	$request->method('PUT');
+	$response = $ua->request($request);
+	$result = from_json( $response->decoded_content );
+	is ( $result->{'result'} , '400' , '/dyndns/host -- bad data; IPv6, JSON result.' );
+	is ( $response->code , '400' , '/dyndns/host -- bad data; IPv6, HTTP reponse.' );
+};
+
+# Test /dyndns/api_key -- Removing an API key.
+# Expects :  {"message":"OK","result":"200"}
+
+subtest '/dyndns/api_key' => sub {
+	# Test 400 status -- no data given.
+	my $request = POST 'https://public-api.sonic.net/dyndns/api_key',['username'=>'','password'=>'','hostname'=>'','apikey'=>''];
+	$request->method('DELETE');
+	$response = $ua->request($request);
+	my $result = from_json( $response->decoded_content );
+	is ( $result->{'result'} , '400' , '/dyndns/api_key -- no data given, JSON result.' );
+	is ( $response->code , '400' , '/dyndns/api_key -- no data given, HTTP reponse.' );
+
+	# Test 401 status -- incorrect password.
+	$request = POST 'https://public-api.sonic.net/dyndns/api_key',['username'=>$username,'password'=>'foobar','hostname'=>$hostname,'apikey'=>$apikey];
+	$request->method('DELETE');
+	$response = $ua->request($request);
+	$result = from_json( $response->decoded_content );
+	is ( $result->{'result'} , '401' , '/dyndns/api_key -- incorrect apikey, JSON result.' );
+	is ( $response->code , '401' , '/dyndns/api_key -- incorrect apikey, HTTP reponse.' );
+
+	# Test 200 status -- OK.
+	$request = POST 'https://public-api.sonic.net/dyndns/api_key',['username'=>$username,'password'=>$password,'hostname'=>$hostname,'apikey'=>$apikey];
+	$request->method('DELETE');
+	$response = $ua->request($request);
+	$result = from_json( $response->decoded_content );
+	is ( $result->{'result'} , '200' , '/dyndns/api_key -- OK status, JSON result.' );
+	is ( $response->code , '200' , '/dyndns/api_key -- OK status, HTTP response.' );
+};
